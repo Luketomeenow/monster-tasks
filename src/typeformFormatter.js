@@ -4,32 +4,47 @@
  * Qualified (green) = said Yes to investment question or has calendar link.
  * Unqualified (blue) = said No or question not found.
  */
+
+function safe(str, fallback) {
+  const s = (str || '').trim();
+  return s.length > 0 ? s : fallback || '—';
+}
+
+function truncName(str) {
+  const s = safe(str, 'Field');
+  return s.length > 256 ? s.slice(0, 253) + '...' : s;
+}
+
+function truncValue(str) {
+  const s = safe(str, '—');
+  return s.length > 1024 ? s.slice(0, 1021) + '...' : s;
+}
+
 function buildNewLeadEmbed(lead) {
   const color = lead.qualified ? 0x2ecc71 : 0x3498db;
   const title = lead.qualified ? 'New Lead Optin - QUALIFIED' : 'New Lead Optin';
 
   const embedFields = [
-    { name: 'Time', value: lead.dateStr, inline: true },
-    { name: 'Name', value: lead.name, inline: true },
-    { name: 'Email', value: lead.email, inline: true },
-    { name: 'Phone', value: lead.phone, inline: true },
+    { name: 'Time', value: safe(lead.dateStr, '—'), inline: true },
+    { name: 'Name', value: safe(lead.name, '—'), inline: true },
+    { name: 'Email', value: safe(lead.email, '—'), inline: true },
+    { name: 'Phone', value: safe(lead.phone, '—'), inline: true },
   ];
 
-  // Add all Typeform answers (skip first/last name, email, phone since they're already above)
   const skipPatterns = ['first name', 'last name', 'email', 'phone', 'full name'];
-  for (const f of lead.fields) {
-    const lower = f.title.toLowerCase();
+  for (const f of (lead.fields || [])) {
+    const lower = (f.title || '').toLowerCase();
     if (skipPatterns.some((p) => lower.includes(p))) continue;
 
-    const val = f.value || 'N/A';
+    const fieldName = truncName(f.title);
+    const fieldValue = truncValue(f.value);
     embedFields.push({
-      name: f.title,
-      value: val.length > 1024 ? val.slice(0, 1021) + '...' : val,
-      inline: val.length < 100,
+      name: fieldName,
+      value: fieldValue,
+      inline: fieldValue.length < 100,
     });
   }
 
-  // Attribution from hidden fields (UTM etc.)
   const h = lead.hidden || {};
   const hiddenEntries = Object.entries(h).filter(([, v]) => v && String(v).trim());
   if (hiddenEntries.length > 0) {
@@ -39,7 +54,7 @@ function buildNewLeadEmbed(lead) {
     });
     embedFields.push({
       name: 'ATTRIBUTION',
-      value: attrLines.join('\n'),
+      value: truncValue(attrLines.join('\n')),
       inline: false,
     });
   }
@@ -47,7 +62,7 @@ function buildNewLeadEmbed(lead) {
   if (lead.calendarLink) {
     embedFields.push({
       name: 'Calendar Link',
-      value: lead.calendarLink,
+      value: truncValue(lead.calendarLink),
       inline: false,
     });
   }
