@@ -5,7 +5,7 @@ const { sendEmbed } = require('./discord');
 const { buildEmbed } = require('./formatters');
 const { parsePayload, buildLeadFromParsed } = require('./typeform');
 const { buildNewLeadEmbed } = require('./typeformFormatter');
-const { buildGhlBookedCallEmbed } = require('./ghlFormatter');
+const { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed } = require('./ghlFormatter');
 const state = require('./state');
 
 const app = express();
@@ -66,12 +66,13 @@ app.post('/ghl/webhook', (req, res) => {
   }
 
   const body = req.body || {};
-  if (body.type !== 'AppointmentCreate' || !body.appointment) {
-    res.status(200).json({ success: true, message: 'Ignored' });
-    return;
+  let embed;
+  if (body.type === 'AppointmentCreate' && body.appointment) {
+    embed = buildGhlBookedCallEmbed(body.appointment);
+  } else {
+    embed = buildGhlWorkflowEmbed(body);
   }
 
-  const embed = buildGhlBookedCallEmbed(body.appointment);
   sendEmbed(webhookUrl, embed)
     .then(() => {
       console.log('[GHL] Call booked sent to Discord');

@@ -46,4 +46,40 @@ function formatGhlDate(iso) {
   }
 }
 
-module.exports = { buildGhlBookedCallEmbed };
+/**
+ * Build embed from GHL workflow webhook payload (contact details + any custom/trigger data).
+ * GHL workflow "Fire a webhook" sends contact and custom data, not the developer AppointmentCreate shape.
+ */
+function buildGhlWorkflowEmbed(body) {
+  const contact = body.contact || body;
+  const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.name || contact.fullName || '—';
+  const email = contact.email || body.email || '—';
+  const phone = contact.phone || contact.phoneNumber || body.phone || '—';
+
+  const fields = [
+    { name: 'Name', value: name, inline: true },
+    { name: 'Email', value: email, inline: true },
+    { name: 'Phone', value: phone, inline: true },
+  ];
+
+  // Include any other top-level or contact fields that look useful (avoid huge objects)
+  const skip = new Set(['contact', 'firstName', 'lastName', 'name', 'fullName', 'email', 'phone', 'phoneNumber']);
+  for (const [key, value] of Object.entries(body)) {
+    if (skip.has(key) || value == null || typeof value === 'object') continue;
+    const str = String(value).trim();
+    if (str.length > 0 && str.length < 1024) {
+      const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase());
+      fields.push({ name: label, value: str, inline: true });
+    }
+  }
+
+  return {
+    title: '📅 Call booked (GHL)',
+    color: 0x1abc9c,
+    fields,
+    footer: { text: 'BSM Bot · GoHighLevel Calendar' },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+module.exports = { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed };
