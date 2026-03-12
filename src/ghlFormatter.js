@@ -82,4 +82,48 @@ function buildGhlWorkflowEmbed(body) {
   };
 }
 
-module.exports = { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed };
+const OPPORTUNITY_STAGES = {
+  no_show: { label: 'No show', color: 0xe74c3c },
+  follow_up: { label: 'Follow up', color: 0xf39c12 },
+  closed_deal: { label: 'Closed deal', color: 0x2ecc71 },
+};
+
+/**
+ * Build embed for opportunity pipeline stage (No show, Follow up, Closed deal).
+ * stageKey: 'no_show' | 'follow_up' | 'closed_deal'
+ */
+function buildGhlOpportunityEmbed(stageKey, body) {
+  const stage = OPPORTUNITY_STAGES[stageKey] || { label: stageKey, color: 0x3498db };
+
+  const contact = body.contact || body;
+  const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.name || contact.fullName || '—';
+  const email = contact.email || body.email || '—';
+  const phone = contact.phone || contact.phoneNumber || body.phone || '—';
+
+  const fields = [
+    { name: 'Stage', value: stage.label, inline: true },
+    { name: 'Name', value: name, inline: true },
+    { name: 'Email', value: email, inline: true },
+    { name: 'Phone', value: phone, inline: true },
+  ];
+
+  const skip = new Set(['contact', 'stage', 'stageName', 'pipelineStage', 'status', 'firstName', 'lastName', 'name', 'fullName', 'email', 'phone', 'phoneNumber']);
+  for (const [key, value] of Object.entries(body)) {
+    if (skip.has(key) || value == null || typeof value === 'object') continue;
+    const str = String(value).trim();
+    if (str.length > 0 && str.length < 1024) {
+      const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase());
+      fields.push({ name: label, value: str, inline: true });
+    }
+  }
+
+  return {
+    title: `📌 Pipeline: ${stage.label}`,
+    color: stage.color,
+    fields,
+    footer: { text: 'BSM Bot · Opportunity Pipeline' },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+module.exports = { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed, buildGhlOpportunityEmbed };

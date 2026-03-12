@@ -5,7 +5,7 @@ const { sendEmbed } = require('./discord');
 const { buildEmbed } = require('./formatters');
 const { parsePayload, buildLeadFromParsed } = require('./typeform');
 const { buildNewLeadEmbed } = require('./typeformFormatter');
-const { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed } = require('./ghlFormatter');
+const { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed, buildGhlOpportunityEmbed } = require('./ghlFormatter');
 const state = require('./state');
 
 const app = express();
@@ -86,6 +86,50 @@ app.post('/ghl/webhook', (req, res) => {
     })
     .catch((err) => {
       console.error('[GHL] Discord webhook failed:', err.message);
+      res.status(200).json({ success: false, error: err.message });
+    });
+});
+
+const OPPORTUNITY_WEBHOOKS = {
+  no_show: 'DISCORD_WEBHOOK_NO_SHOW',
+  follow_up: 'DISCORD_WEBHOOK_FOLLOW_UP',
+  closed_deal: 'DISCORD_WEBHOOK_CLOSED_DEAL',
+};
+
+function normalizePipelineStage(value) {
+  const v = (value || '').toLowerCase().replace(/[\s-]/g, '_');
+  if (v.includes('no_show') || v.includes('noshow')) return 'no_show';
+  if (v.includes('follow') || v.includes('followup')) return 'follow_up';
+  if (v.includes('closed') || v.includes('deal')) return 'closed_deal';
+  return null;
+}
+
+app.post('/ghl/opportunity', (req, res) => {
+  const body = req.body || {};
+  const stageRaw = body.stage ?? body.stageName ?? body.pipelineStage ?? body.status ?? body.pipeline_stage ?? '';
+  const stageKey = normalizePipelineStage(stageRaw);
+
+  if (!stageKey || !OPPORTUNITY_WEBHOOKS[stageKey]) {
+    console.error('[GHL Opportunity] Unknown or missing stage:', stageRaw);
+    res.status(200).json({ success: false, error: 'Unknown stage. Use: no_show, follow_up, or closed_deal' });
+    return;
+  }
+
+  const webhookUrl = (process.env[OPPORTUNITY_WEBHOOKS[stageKey]] || '').trim();
+  if (!webhookUrl) {
+    console.error('[GHL Opportunity]', OPPORTUNITY_WEBHOOKS[stageKey], 'not set');
+    res.status(200).json({ success: false, error: `Webhook not configured for ${stageKey}` });
+    return;
+  }
+
+  const embed = buildGhlOpportunityEmbed(stageKey, body);
+  sendEmbed(webhookUrl, embed)
+    .then(() => {
+      console.log('[GHL Opportunity] Sent to Discord:', stageKey);
+      res.status(200).json({ success: true });
+    })
+    .catch((err) => {
+      console.error('[GHL Opportunity] Discord failed:', err.message);
       res.status(200).json({ success: false, error: err.message });
     });
 });
