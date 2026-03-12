@@ -1,7 +1,6 @@
 /**
- * Parse Typeform webhook payload into a flat key-value map and metadata.
+ * Parse Typeform webhook payload into an ordered list of { title, value } pairs.
  * Typeform sends: event_type, form_response: { answers[], definition?, hidden?, submitted_at }
- * Each answer has: type, field: { id, ref }, and value in type-specific key (text, email, url, choice, etc.)
  */
 function getAnswerValue(answer) {
   if (!answer) return '';
@@ -25,18 +24,6 @@ function getAnswerValue(answer) {
   return '';
 }
 
-function normalizeKey(key) {
-  if (!key || typeof key !== 'string') return '';
-  return key
-    .toLowerCase()
-    .replace(/\s+/g, '_')
-    .replace(/[^a-z0-9_]/g, '');
-}
-
-/**
- * Build a map of field ref/id -> value from form_response.answers and optional definition.
- * Also merge in form_response.hidden for UTM/attribution.
- */
 function parsePayload(body) {
   const eventType = body?.event_type;
   const formResponse = body?.form_response;
@@ -50,127 +37,89 @@ function parsePayload(body) {
     String(d.getMonth() + 1).padStart(2, '0'),
     String(d.getDate()).padStart(2, '0'),
     d.getFullYear(),
-  ].join('/'); // MM/DD/YYYY
+  ].join('/');
 
-  const map = {};
   const answers = formResponse.answers || [];
   const definition = formResponse.definition || {};
   const fieldsDef = definition.fields || [];
 
+  // Build ordered list of { title, value } from answers, using definition for titles
+  const fields = [];
   for (const answer of answers) {
-    const field = answer.field || {};
-    const ref = field.ref ? normalizeKey(field.ref) : '';
-    const id = field.id || '';
+    const fieldId = answer.field?.id || '';
+    const fieldDef = fieldsDef.find((f) => f.id === fieldId);
+    const title = fieldDef?.title || answer.field?.ref || `Field ${fieldId}`;
     const value = getAnswerValue(answer);
-    if (ref) map[ref] = value;
-    if (id) map[id] = value;
-    // Also store by title if we have definition
-    const fieldDef = fieldsDef.find((f) => f.id === id);
-    if (fieldDef?.title) {
-      map[normalizeKey(fieldDef.title)] = value;
-    }
+    fields.push({ title, value });
   }
 
-  // Hidden fields (e.g. UTM)
+  // Hidden fields (UTM etc.)
   const hidden = formResponse.hidden || {};
-  for (const [k, v] of Object.entries(hidden)) {
-    map[normalizeKey(k)] = v;
-  }
 
-  return {
-    submittedAt,
-    dateStr,
-    map,
-    raw: formResponse,
-  };
+  return { submittedAt, dateStr, fields, hidden };
 }
 
 /**
- * Map Typeform keys (refs/titles) to our display keys. We try several possible refs per display key.
+ * Keywords in the question title that indicate the cost/investment qualification question.
  */
-const DISPLAY_KEY_ALIASES = {
-  time: ['time', 'timestamp', 'date'],
-  name: ['name', 'full_name', 'your_name', 'first_name', 'name_1'],
-  email: ['email', 'email_address'],
-  phone: ['phone', 'phone_number', 'tel', 'mobile'],
-  work_situation: ['work_situation', 'work_situation_1', 'current_work', 'employment'],
-  monthly_income: ['monthly_income', 'income', 'income_range', 'monthly_income_1'],
-  has_budget: ['has_budget', 'budget', 'has_budget_2_3k', 'tools_marketing_budget'],
-  package_selection: ['package_selection', 'package', 'selected_package', 'package_choice'],
-  source: ['source', 'lead_source', 'where_did_you_hear', 'how_did_you_hear'],
-  why_land_flipping: ['why_land_flipping', 'why_land_flip', 'why_interest', 'reason'],
-  calendar_link: ['calendar_link', 'calendar_url', 'calendly', 'booking_link', 'meeting_link'],
-  // Qualification: Yes/No to cost of program (Yes = qualified, can book a call)
-  program_cost_ok: ['program_cost_ok', 'cost_of_program', 'cost_ok', 'program_cost', 'ok_with_cost', 'yes_no_cost', 'agree_to_cost'],
-  // Attribution (often in hidden)
-  utm_source: ['utm_source', 'source', 'src'],
-  utm_medium: ['utm_medium', 'medium', 'med'],
-  utm_campaign: ['utm_campaign', 'campaign', 'camp'],
-  utm_term: ['utm_term', 'term'],
-  utm_content: ['utm_content', 'content'],
-};
+const COST_KEYWORDS = ['invest', 'investment', 'cost', 'program', 'available to invest', 'budget'];
 
-function getFirstMatch(map, aliases) {
-  for (const a of aliases) {
-    const v = map[a];
-    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
-  }
-  return null;
+function isQualificationQuestion(title) {
+  const lower = (title || '').toLowerCase();
+  return COST_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
-/**
- * Build lead object for Discord embed. Uses N/A for missing fields.
- */
+function isYesAnswer(value) {
+  const lower = (value || '').toLowerCase().trim();
+  return lower.startsWith('yes') || lower === 'y' || lower === 'true' || lower.startsWith('i can') || lower.startsWith('i agree');
+}
+
 function buildLeadFromParsed(parsed) {
-  const { map, dateStr } = parsed;
-  const get = (displayKey) => getFirstMatch(map, DISPLAY_KEY_ALIASES[displayKey] || [displayKey]);
+  const { dateStr, fields, hidden } = parsed;
 
-  const name = get('name') || 'N/A';
-  const email = get('email') || 'N/A';
-  const phone = get('phone') || 'N/A';
-  const workSituation = get('work_situation') || 'N/A';
-  const monthlyIncome = get('monthly_income') || 'N/A';
-  const hasBudget = get('has_budget') || 'N/A';
-  const packageSelection = get('package_selection') || 'N/A';
-  const source = get('source') || 'N/A';
-  const whyLandFlipping = get('why_land_flipping') || 'N/A';
-  let calendarLink = get('calendar_link');
-  if (!calendarLink && map) {
-    for (const v of Object.values(map)) {
-      if (typeof v === 'string' && v.includes('calendly.com')) {
-        calendarLink = v.trim();
-        break;
-      }
+  // Find name from first/last name fields or a "name" field
+  let firstName = '';
+  let lastName = '';
+  let email = '';
+  let phone = '';
+  let qualified = false;
+  let costAnswer = '';
+
+  for (const f of fields) {
+    const lower = f.title.toLowerCase();
+    if (lower.includes('first name')) firstName = f.value;
+    else if (lower.includes('last name')) lastName = f.value;
+    else if (lower === 'name' || lower === 'full name') firstName = f.value;
+    else if (lower.includes('email')) email = f.value;
+    else if (lower.includes('phone')) phone = f.value;
+
+    if (isQualificationQuestion(f.title)) {
+      costAnswer = f.value;
+      if (isYesAnswer(f.value)) qualified = true;
     }
   }
 
-  // Attribution
-  const utmSource = get('utm_source') || 'N/A';
-  const utmMedium = get('utm_medium') || 'N/A';
-  const utmCampaign = get('utm_campaign') || 'N/A';
-  const utmTerm = get('utm_term') || 'N/A';
-  const utmContent = get('utm_content') || 'N/A';
+  const name = [firstName, lastName].filter(Boolean).join(' ') || 'N/A';
 
-  // Qualified = said Yes to cost of program (able to book a call), else No = unqualified
-  const programCostAnswer = (get('program_cost_ok') || '').toLowerCase().trim();
-  const saidYesToCost = ['yes', 'y', 'true', '1', 'i agree', 'agree'].includes(programCostAnswer);
-  const hasCalendar = calendarLink && calendarLink.trim() !== '';
-  const qualified = saidYesToCost || hasCalendar;
+  // Check for calendar link in any answer
+  let calendarLink = null;
+  for (const f of fields) {
+    if (typeof f.value === 'string' && f.value.includes('calendly.com')) {
+      calendarLink = f.value.trim();
+      if (!qualified) qualified = true;
+      break;
+    }
+  }
 
   return {
     dateStr,
     name,
-    email,
-    phone,
-    workSituation,
-    monthlyIncome,
-    hasBudget,
-    packageSelection,
-    source,
-    whyLandFlipping,
-    programCostAnswer: get('program_cost_ok') || 'N/A',
-    calendarLink: calendarLink || null,
-    attribution: { utmSource, utmMedium, utmCampaign, utmTerm, utmContent },
+    email: email || 'N/A',
+    phone: phone || 'N/A',
+    fields,
+    hidden,
+    costAnswer: costAnswer || 'N/A',
+    calendarLink,
     qualified,
   };
 }
