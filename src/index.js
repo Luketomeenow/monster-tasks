@@ -5,6 +5,7 @@ const { sendEmbed } = require('./discord');
 const { buildEmbed } = require('./formatters');
 const { parsePayload, buildLeadFromParsed } = require('./typeform');
 const { buildNewLeadEmbed } = require('./typeformFormatter');
+const { buildGhlBookedCallEmbed } = require('./ghlFormatter');
 const state = require('./state');
 
 const app = express();
@@ -53,6 +54,32 @@ app.post('/typeform/webhook', (req, res) => {
         error: 'Failed to send to Discord',
         detail: err.message,
       });
+    });
+});
+
+app.post('/ghl/webhook', (req, res) => {
+  const webhookUrl = (process.env.DISCORD_WEBHOOK_BOOKED_CALL || '').trim();
+  if (!webhookUrl) {
+    console.error('[GHL] DISCORD_WEBHOOK_BOOKED_CALL not set');
+    res.status(200).json({ success: false, error: 'Call-booked webhook not configured' });
+    return;
+  }
+
+  const body = req.body || {};
+  if (body.type !== 'AppointmentCreate' || !body.appointment) {
+    res.status(200).json({ success: true, message: 'Ignored' });
+    return;
+  }
+
+  const embed = buildGhlBookedCallEmbed(body.appointment);
+  sendEmbed(webhookUrl, embed)
+    .then(() => {
+      console.log('[GHL] Call booked sent to Discord');
+      res.status(200).json({ success: true });
+    })
+    .catch((err) => {
+      console.error('[GHL] Discord webhook failed:', err.message);
+      res.status(200).json({ success: false, error: err.message });
     });
 });
 
