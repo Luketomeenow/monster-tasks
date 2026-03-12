@@ -17,21 +17,30 @@ app.get('/health', (_req, res) => {
 });
 
 app.post('/typeform/webhook', (req, res) => {
-  const webhookUrl = process.env.DISCORD_WEBHOOK_NEW_LEAD;
+  const rawUrl = process.env.DISCORD_WEBHOOK_NEW_LEAD;
+  const webhookUrl = rawUrl ? rawUrl.trim() : '';
   if (!webhookUrl) {
     console.error('[Typeform] DISCORD_WEBHOOK_NEW_LEAD not set');
-    res.status(500).json({ error: 'New lead webhook not configured' });
+    res.status(500).json({ error: 'New lead webhook not configured', detail: 'Set DISCORD_WEBHOOK_NEW_LEAD in Railway Variables' });
     return;
   }
 
-  const parsed = parsePayload(req.body);
-  if (!parsed) {
-    res.status(400).json({ error: 'Invalid Typeform webhook payload' });
+  let parsed;
+  let lead;
+  let embed;
+  try {
+    parsed = parsePayload(req.body);
+    if (!parsed) {
+      res.status(400).json({ error: 'Invalid Typeform webhook payload' });
+      return;
+    }
+    lead = buildLeadFromParsed(parsed);
+    embed = buildNewLeadEmbed(lead);
+  } catch (err) {
+    console.error('[Typeform] Parse/format error:', err.message);
+    res.status(500).json({ error: 'Error processing payload', detail: err.message });
     return;
   }
-
-  const lead = buildLeadFromParsed(parsed);
-  const embed = buildNewLeadEmbed(lead);
 
   sendEmbed(webhookUrl, embed)
     .then(() => {
@@ -40,7 +49,10 @@ app.post('/typeform/webhook', (req, res) => {
     })
     .catch((err) => {
       console.error('[Typeform] Discord webhook failed:', err.message);
-      res.status(500).json({ error: 'Failed to send to Discord' });
+      res.status(500).json({
+        error: 'Failed to send to Discord',
+        detail: err.message,
+      });
     });
 });
 
