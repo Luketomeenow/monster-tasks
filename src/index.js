@@ -6,6 +6,7 @@ const { buildEmbed } = require('./formatters');
 const { parsePayload, buildLeadFromParsed } = require('./typeform');
 const { buildNewLeadEmbed } = require('./typeformFormatter');
 const { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed, buildGhlOpportunityEmbed } = require('./ghlFormatter');
+const { buildWhopPaymentEmbed } = require('./whopFormatter');
 const state = require('./state');
 
 const app = express();
@@ -13,8 +14,59 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
+const WHOP_PAYMENT_EVENTS = ['payment.succeeded', 'payment.failed', 'refund.created', 'dispute.created'];
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), forms: FORMS.length });
+});
+
+app.post('/whop/webhook', (req, res) => {
+  const webhookUrl = (process.env.DISCORD_WEBHOOK_PAYMENTS || process.env.DISCORD_WEBHOOK_NEW_PAYMENTS || '').trim();
+  const failedWebhookUrl = (process.env.DISCORD_WEBHOOK_FAILED_PAYMENTS || '').trim();
+
+  if (!webhookUrl && !failedWebhookUrl) {
+    console.error('[WHOP] No payment webhook configured');
+    res.status(200).json({ success: false, error: 'Set DISCORD_WEBHOOK_PAYMENTS (and optionally DISCORD_WEBHOOK_FAILED_PAYMENTS) in Railway' });
+    return;
+  }
+
+  const body = req.body || {};
+  let eventType = body.type || body.event;
+  let data = body.data ?? body.payload ?? body;
+
+  if (!eventType && data && data.object) {
+    eventType = data.object;
+    data = data;
+  }
+  if (!eventType) {
+    console.error('[WHOP] Missing event type in payload');
+    res.status(200).json({ success: false, error: 'Missing type' });
+    return;
+  }
+
+  const isFailed = eventType === 'payment.failed' || eventType === 'dispute.created';
+  const targetUrl = isFailed && failedWebhookUrl ? failedWebhookUrl : webhookUrl;
+  if (!targetUrl) {
+    res.status(200).json({ success: false, error: isFailed ? 'DISCORD_WEBHOOK_FAILED_PAYMENTS not set' : 'DISCORD_WEBHOOK_PAYMENTS not set' });
+    return;
+  }
+
+  if (!WHOP_PAYMENT_EVENTS.includes(eventType)) {
+    console.log('[WHOP] Ignoring event:', eventType);
+    res.status(200).json({ success: true, message: 'Ignored' });
+    return;
+  }
+
+  const embed = buildWhopPaymentEmbed(eventType, data);
+  sendEmbed(targetUrl, embed)
+    .then(() => {
+      console.log('[WHOP] Sent to Discord:', eventType);
+      res.status(200).json({ success: true });
+    })
+    .catch((err) => {
+      console.error('[WHOP] Discord failed:', err.message);
+      res.status(200).json({ success: false, error: err.message });
+    });
 });
 
 app.post('/typeform/webhook', (req, res) => {
