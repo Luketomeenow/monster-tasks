@@ -3,13 +3,45 @@ const { FORMS, POLL_INTERVAL_MS } = require('./config');
 const { getRowCount, getNewRows } = require('./sheets');
 const { sendEmbed } = require('./discord');
 const { buildEmbed } = require('./formatters');
+const { parsePayload, buildLeadFromParsed } = require('./typeform');
+const { buildNewLeadEmbed } = require('./typeformFormatter');
 const state = require('./state');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), forms: FORMS.length });
+});
+
+app.post('/typeform/webhook', (req, res) => {
+  const webhookUrl = process.env.DISCORD_WEBHOOK_NEW_LEAD;
+  if (!webhookUrl) {
+    console.error('[Typeform] DISCORD_WEBHOOK_NEW_LEAD not set');
+    res.status(500).json({ error: 'New lead webhook not configured' });
+    return;
+  }
+
+  const parsed = parsePayload(req.body);
+  if (!parsed) {
+    res.status(400).json({ error: 'Invalid Typeform webhook payload' });
+    return;
+  }
+
+  const lead = buildLeadFromParsed(parsed);
+  const embed = buildNewLeadEmbed(lead);
+
+  sendEmbed(webhookUrl, embed)
+    .then(() => {
+      console.log(`[Typeform] New lead sent to Discord (${lead.qualified ? 'QUALIFIED' : 'Unqualified'})`);
+      res.status(200).send();
+    })
+    .catch((err) => {
+      console.error('[Typeform] Discord webhook failed:', err.message);
+      res.status(500).json({ error: 'Failed to send to Discord' });
+    });
 });
 
 async function initState(savedState) {
