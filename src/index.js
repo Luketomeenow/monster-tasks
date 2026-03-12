@@ -66,6 +66,10 @@ app.post('/ghl/webhook', (req, res) => {
   }
 
   const body = req.body || {};
+  console.log('[GHL] Received payload keys:', Object.keys(body));
+  console.log('[GHL] Payload:', JSON.stringify(body).slice(0, 500));
+  console.log('[GHL] Sending to webhook URL ending in:', '...' + webhookUrl.slice(-20));
+
   let embed;
   if (body.type === 'AppointmentCreate' && body.appointment) {
     embed = buildGhlBookedCallEmbed(body.appointment);
@@ -73,14 +77,44 @@ app.post('/ghl/webhook', (req, res) => {
     embed = buildGhlWorkflowEmbed(body);
   }
 
+  console.log('[GHL] Embed title:', embed.title, '| fields:', embed.fields.length);
+
   sendEmbed(webhookUrl, embed)
     .then(() => {
-      console.log('[GHL] Call booked sent to Discord');
+      console.log('[GHL] Call booked sent to Discord successfully');
       res.status(200).json({ success: true });
     })
     .catch((err) => {
       console.error('[GHL] Discord webhook failed:', err.message);
       res.status(200).json({ success: false, error: err.message });
+    });
+});
+
+app.get('/ghl/test', (_req, res) => {
+  const webhookUrl = (process.env.DISCORD_WEBHOOK_BOOKED_CALL || '').trim();
+  if (!webhookUrl) {
+    res.json({ error: 'DISCORD_WEBHOOK_BOOKED_CALL not set' });
+    return;
+  }
+
+  const testEmbed = {
+    title: '📅 Test - Call booked (GHL)',
+    color: 0x1abc9c,
+    description: 'This is a test message to verify the webhook is working.',
+    fields: [
+      { name: 'Name', value: 'Test Contact', inline: true },
+      { name: 'Email', value: 'test@example.com', inline: true },
+    ],
+    footer: { text: 'BSM Bot · Test' },
+    timestamp: new Date().toISOString(),
+  };
+
+  sendEmbed(webhookUrl, testEmbed)
+    .then(() => {
+      res.json({ success: true, message: 'Test message sent to Discord' });
+    })
+    .catch((err) => {
+      res.json({ success: false, error: err.message });
     });
 });
 
