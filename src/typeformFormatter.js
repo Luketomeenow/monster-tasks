@@ -20,6 +20,23 @@ function truncValue(str) {
   return s.length > 1024 ? s.slice(0, 1021) + '...' : s;
 }
 
+/** Short labels for long Typeform question titles (match by key phrase). */
+const SHORT_LABELS = [
+  { match: 'how long have you been living in the uk', label: 'Residency Status' },
+  { match: 'why are you considering changing your career', label: 'Why career change' },
+  { match: 'what best describes your work circumstances', label: 'Work circumstances' },
+  { match: 'investment for our program', label: 'Investment Ability' },
+  { match: 'when would you like to start', label: 'Start Time?' },
+];
+
+function getShortLabel(questionTitle) {
+  const lower = (questionTitle || '').toLowerCase();
+  for (const { match, label } of SHORT_LABELS) {
+    if (lower.includes(match)) return label;
+  }
+  return null;
+}
+
 function buildNewLeadEmbed(lead) {
   const color = lead.qualified ? 0x2ecc71 : 0x3498db;
   const title = lead.qualified ? 'New Lead Optin - QUALIFIED' : 'New Lead Optin';
@@ -36,7 +53,8 @@ function buildNewLeadEmbed(lead) {
     const lower = (f.title || '').toLowerCase();
     if (skipPatterns.some((p) => lower.includes(p))) continue;
 
-    const fieldName = truncName(f.title);
+    const shortLabel = getShortLabel(f.title);
+    const fieldName = truncName(shortLabel || f.title);
     const fieldValue = truncValue(f.value);
     embedFields.push({
       name: fieldName,
