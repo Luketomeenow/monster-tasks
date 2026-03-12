@@ -134,6 +134,42 @@ app.post('/ghl/opportunity', (req, res) => {
     });
 });
 
+app.get('/ghl/opportunity/test', (req, res) => {
+  const stageParam = (req.query.stage || '').trim();
+  const stageKey = normalizePipelineStage(stageParam);
+
+  if (!stageKey || !OPPORTUNITY_WEBHOOKS[stageKey]) {
+    res.json({
+      error: 'Missing or invalid stage',
+      usage: 'Add ?stage=no_show or ?stage=follow_up or ?stage=closed_deal to the URL',
+    });
+    return;
+  }
+
+  const webhookUrl = (process.env[OPPORTUNITY_WEBHOOKS[stageKey]] || '').trim();
+  if (!webhookUrl) {
+    res.json({ error: OPPORTUNITY_WEBHOOKS[stageKey] + ' not set in Railway Variables' });
+    return;
+  }
+
+  const testBody = {
+    firstName: 'Test',
+    lastName: 'Contact',
+    email: 'test@example.com',
+    phone: '—',
+  };
+  const embed = buildGhlOpportunityEmbed(stageKey, testBody);
+  embed.title = '🧪 Test – ' + embed.title;
+
+  sendEmbed(webhookUrl, embed)
+    .then(() => {
+      res.json({ success: true, message: `Test sent to ${stageKey} channel` });
+    })
+    .catch((err) => {
+      res.json({ success: false, error: err.message });
+    });
+});
+
 app.get('/ghl/test', (_req, res) => {
   const webhookUrl = (process.env.DISCORD_WEBHOOK_BOOKED_CALL || '').trim();
   if (!webhookUrl) {
