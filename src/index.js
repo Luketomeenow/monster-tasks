@@ -193,24 +193,26 @@ function normalizePipelineStage(value) {
   return null;
 }
 
-/** Extract stage from GHL webhook body (multiple possible shapes). */
+/** Extract stage from GHL webhook body (multiple possible shapes). Prefer workflow Custom Data over trigger payload (e.g. status: "open"). */
 function getStageFromBody(body) {
   const candidates = [
+    body.customData?.stage,
+    body.custom_data?.stage,
     body.stage,
     body.stageName,
     body.stage_name,
     body.pipelineStage,
     body.pipeline_stage,
-    body.status,
     body.newStage,
     body.new_stage,
     body.opportunity?.stage,
     body.opportunity?.stageName,
-    body.opportunity?.status,
     body.data?.stage,
     body.data?.stageName,
     body.trigger?.stage,
     body.trigger?.stageName,
+    body.opportunity?.status,
+    body.status,
   ];
   for (const c of candidates) {
     if (c != null && String(c).trim() !== '') return String(c).trim();
