@@ -7,6 +7,7 @@ const { parsePayload, buildLeadFromParsed } = require('./typeform');
 const { buildNewLeadEmbed } = require('./typeformFormatter');
 const { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed, buildGhlOpportunityEmbed } = require('./ghlFormatter');
 const { buildWhopPaymentEmbed } = require('./whopFormatter');
+const { buildPayItMonthlyEmbed } = require('./payitmonthlyFormatter');
 const state = require('./state');
 
 const app = express();
@@ -70,6 +71,36 @@ app.post('/whop/webhook', (req, res) => {
     })
     .catch((err) => {
       console.error('[WHOP] Discord failed:', err.message);
+      res.status(200).json({ success: false, error: err.message });
+    });
+});
+
+const PAYITMONTHLY_EVENTS = ['Decision', 'Finance App Status', 'prefilter_outcome', 'agreement_status'];
+
+app.post('/payitmonthly/webhook', (req, res) => {
+  const webhookUrl = (process.env.DISCORD_WEBHOOK_PAYMENTS || process.env.DISCORD_WEBHOOK_NEW_PAYMENTS || '').trim();
+  if (!webhookUrl) {
+    console.error('[PayItMonthly] DISCORD_WEBHOOK_PAYMENTS not set');
+    res.status(200).json({ success: false, error: 'Payment webhook not configured' });
+    return;
+  }
+
+  const body = req.body || {};
+  const eventType = body.type ?? body.event ?? body.webhook_type ?? body.event_type ?? '';
+  const data = body.data ?? body.payload ?? body;
+
+  console.log('[PayItMonthly] Event:', eventType, '| Keys:', Object.keys(body));
+
+  const normalizedType = PAYITMONTHLY_EVENTS.includes(eventType) ? eventType : (eventType || 'unknown');
+  const embed = buildPayItMonthlyEmbed(normalizedType, typeof data === 'object' ? data : body);
+
+  sendEmbed(webhookUrl, embed)
+    .then(() => {
+      console.log('[PayItMonthly] Sent to Discord:', normalizedType);
+      res.status(200).json({ success: true });
+    })
+    .catch((err) => {
+      console.error('[PayItMonthly] Discord failed:', err.message);
       res.status(200).json({ success: false, error: err.message });
     });
 });
