@@ -12,10 +12,16 @@ function formatAmount(value, currency) {
 }
 
 const EVENT_CONFIG = {
-  'payment.succeeded': { title: '✅ New payment', color: 0x2ecc71, emoji: '✅' },
-  'payment.failed': { title: '❌ Failed payment', color: 0xe74c3c, emoji: '❌' },
-  'refund.created': { title: '↩️ Refund', color: 0xf39c12, emoji: '↩️' },
-  'dispute.created': { title: '⚠️ Dispute', color: 0xe67e22, emoji: '⚠️' },
+  'payment.succeeded': { title: 'New payment', color: 0x2ecc71, emoji: '✅' },
+  'payment.failed': { title: 'Failed payment', color: 0xe74c3c, emoji: '❌' },
+  'refund.created': { title: 'Refund', color: 0xf39c12, emoji: '↩️' },
+  'dispute.created': { title: 'Dispute', color: 0xe67e22, emoji: '⚠️' },
+  'invoice_paid': { title: 'New payment (invoice paid)', color: 0x2ecc71, emoji: '✅' },
+  'invoice_created': { title: 'Invoice created', color: 0x3498db, emoji: '📄' },
+  'invoice_past_due': { title: 'Invoice past due', color: 0xe74c3c, emoji: '❌' },
+  'invoice_voided': { title: 'Invoice voided', color: 0xe74c3c, emoji: '🚫' },
+  'membership_activated': { title: 'Membership activated', color: 0x2ecc71, emoji: '✅' },
+  'membership_deactivated': { title: 'Membership deactivated', color: 0xf39c12, emoji: '↩️' },
 };
 
 function buildWhopPaymentEmbed(eventType, data) {

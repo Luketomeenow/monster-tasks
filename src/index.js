@@ -14,7 +14,12 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-const WHOP_PAYMENT_EVENTS = ['payment.succeeded', 'payment.failed', 'refund.created', 'dispute.created'];
+const WHOP_PAYMENT_EVENTS = [
+  'payment.succeeded', 'payment.failed', 'refund.created', 'dispute.created',
+  'invoice_paid', 'invoice_created', 'invoice_past_due', 'invoice_voided',
+  'membership_activated', 'membership_deactivated',
+];
+const WHOP_FAILED_EVENTS = ['payment.failed', 'dispute.created', 'invoice_past_due', 'invoice_voided', 'membership_deactivated'];
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), forms: FORMS.length });
@@ -44,7 +49,7 @@ app.post('/whop/webhook', (req, res) => {
     return;
   }
 
-  const isFailed = eventType === 'payment.failed' || eventType === 'dispute.created';
+  const isFailed = WHOP_FAILED_EVENTS.includes(eventType);
   const targetUrl = isFailed && failedWebhookUrl ? failedWebhookUrl : webhookUrl;
   if (!targetUrl) {
     res.status(200).json({ success: false, error: isFailed ? 'DISCORD_WEBHOOK_FAILED_PAYMENTS not set' : 'DISCORD_WEBHOOK_PAYMENTS not set' });
