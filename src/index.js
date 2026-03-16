@@ -149,21 +149,57 @@ const OPPORTUNITY_WEBHOOKS = {
 };
 
 function normalizePipelineStage(value) {
-  const v = (value || '').toLowerCase().replace(/[\s-]/g, '_');
-  if (v.includes('no_show') || v.includes('noshow')) return 'no_show';
-  if (v.includes('follow') || v.includes('followup')) return 'follow_up';
-  if (v.includes('closed') || v.includes('deal')) return 'closed_deal';
+  if (value == null || value === '') return null;
+  const v = String(value).toLowerCase().replace(/[\s-]/g, '_');
+  if (v.includes('no_show') || v.includes('noshow') || v === 'no_show') return 'no_show';
+  if (v.includes('follow') || v.includes('followup') || v === 'follow_up') return 'follow_up';
+  if (v.includes('closed') || v.includes('deal') || v === 'closed_deal') return 'closed_deal';
   return null;
+}
+
+/** Extract stage from GHL webhook body (multiple possible shapes). */
+function getStageFromBody(body) {
+  const candidates = [
+    body.stage,
+    body.stageName,
+    body.stage_name,
+    body.pipelineStage,
+    body.pipeline_stage,
+    body.status,
+    body.newStage,
+    body.new_stage,
+    body.opportunity?.stage,
+    body.opportunity?.stageName,
+    body.opportunity?.status,
+    body.data?.stage,
+    body.data?.stageName,
+    body.trigger?.stage,
+    body.trigger?.stageName,
+  ];
+  for (const c of candidates) {
+    if (c != null && String(c).trim() !== '') return String(c).trim();
+  }
+  return '';
 }
 
 app.post('/ghl/opportunity', (req, res) => {
   const body = req.body || {};
-  const stageRaw = body.stage ?? body.stageName ?? body.pipelineStage ?? body.status ?? body.pipeline_stage ?? '';
+  const stageRaw = getStageFromBody(body);
   const stageKey = normalizePipelineStage(stageRaw);
 
+  console.log('[GHL Opportunity] Payload keys:', Object.keys(body));
+  console.log('[GHL Opportunity] Stage raw:', stageRaw, '-> normalized:', stageKey);
+  if (!stageKey) {
+    console.log('[GHL Opportunity] Full body (sample):', JSON.stringify(body).slice(0, 800));
+  }
+
   if (!stageKey || !OPPORTUNITY_WEBHOOKS[stageKey]) {
-    console.error('[GHL Opportunity] Unknown or missing stage:', stageRaw);
-    res.status(200).json({ success: false, error: 'Unknown stage. Use: no_show, follow_up, or closed_deal' });
+    console.error('[GHL Opportunity] Unknown or missing stage. Received stageRaw:', stageRaw);
+    res.status(200).json({
+      success: false,
+      error: 'Unknown or missing stage. Send stage in body (e.g. stage: "No show")',
+      received: stageRaw || '(empty)',
+    });
     return;
   }
 
