@@ -1,6 +1,6 @@
 const express = require('express');
 const { FORMS, POLL_INTERVAL_MS } = require('./config');
-const { getRowCount, getNewRows } = require('./sheets');
+const { getRowCount, getNewRows, appendRows } = require('./sheets');
 const { sendEmbed } = require('./discord');
 const { buildEmbed } = require('./formatters');
 const { parsePayload, buildLeadFromParsed } = require('./typeform');
@@ -21,6 +21,23 @@ const WHOP_PAYMENT_EVENTS = [
   'membership_activated', 'membership_deactivated',
 ];
 const WHOP_FAILED_EVENTS = ['payment.failed', 'dispute.created', 'invoice_past_due', 'invoice_voided', 'membership_deactivated'];
+const WHOP_SUCCESS_REVENUE_EVENTS = ['payment.succeeded', 'invoice_paid', 'membership_activated'];
+
+const REVENUE_SHEET_ID = (process.env.REVENUE_SHEET_ID || '').trim();
+const REVENUE_SHEET_NAME = process.env.REVENUE_SHEET_NAME || 'Revenue';
+
+/** Build one Revenue row: [DUE DATE, CLIENT NAME, EMAIL ADDRESS, OFFER, CASH COLLECTED, CONTRACTED, INSTALMENT, STATUS, PAYMENT METHOD, PLATFORM] */
+function buildRevenueRow({ date, clientName, email, cashCollected, platform }) {
+  const dueDate = date ? (typeof date === 'string' && date.match(/^\d{4}-\d{2}-\d{2}/) ? date.slice(0, 10) : new Date(date).toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10);
+  return [dueDate, clientName || '', email || '', '', cashCollected ?? '', '', '', '', '', platform || ''];
+}
+
+function logPaymentToRevenue(row) {
+  if (!REVENUE_SHEET_ID) return Promise.resolve();
+  return appendRows(REVENUE_SHEET_ID, REVENUE_SHEET_NAME, [row])
+    .then(() => console.log('[Revenue] Row appended to', REVENUE_SHEET_NAME))
+    .catch((err) => console.error('[Revenue] Append failed:', err.message));
+}
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), forms: FORMS.length });
@@ -68,6 +85,18 @@ app.post('/whop/webhook', (req, res) => {
     .then(() => {
       console.log('[WHOP] Sent to Discord:', eventType);
       res.status(200).json({ success: true });
+      if (REVENUE_SHEET_ID && WHOP_SUCCESS_REVENUE_EVENTS.includes(eventType)) {
+        const user = data.user ?? data.member ?? data.customer ?? {};
+        const clientName = user.username ?? user.name ?? [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.email || '';
+        const email = user.email ?? data.email ?? '';
+        let cash = data.amount ?? data.total ?? data.value;
+        if (cash != null) {
+          const num = Number(cash);
+          cash = Number.isNaN(num) ? cash : (num >= 1000 || num <= -1000 ? num / 100 : num);
+        }
+        const date = data.paid_at ?? data.created_at ?? data.completed_at;
+        logPaymentToRevenue(buildRevenueRow({ date, clientName, email, cashCollected: cash, platform: 'Whop' })).catch(() => {});
+      }
     })
     .catch((err) => {
       console.error('[WHOP] Discord failed:', err.message);
@@ -93,11 +122,22 @@ app.post('/payitmonthly/webhook', (req, res) => {
 
   const normalizedType = PAYITMONTHLY_EVENTS.includes(eventType) ? eventType : (eventType || 'unknown');
   const embed = buildPayItMonthlyEmbed(normalizedType, typeof data === 'object' ? data : body);
+  const payItMonthlyData = typeof data === 'object' ? data : body;
 
   sendEmbed(webhookUrl, embed)
     .then(() => {
       console.log('[PayItMonthly] Sent to Discord:', normalizedType);
       res.status(200).json({ success: true });
+      if (REVENUE_SHEET_ID && payItMonthlyData) {
+        const amount = payItMonthlyData.amount ?? payItMonthlyData.total ?? payItMonthlyData.value ?? payItMonthlyData.payment_amount;
+        if (amount != null && Number(amount) > 0) {
+          const clientName = payItMonthlyData.customer_name ?? payItMonthlyData.name ?? payItMonthlyData.client_name ?? payItMonthlyData.customerName ?? '';
+          const email = payItMonthlyData.email ?? payItMonthlyData.customer_email ?? payItMonthlyData.customerEmail ?? '';
+          const date = payItMonthlyData.date ?? payItMonthlyData.created_at ?? payItMonthlyData.paid_at;
+          const cashCollected = Number(amount);
+          logPaymentToRevenue(buildRevenueRow({ date, clientName, email, cashCollected: Number.isNaN(cashCollected) ? amount : cashCollected, platform: 'Pay It Monthly' })).catch(() => {});
+        }
+      }
     })
     .catch((err) => {
       console.error('[PayItMonthly] Discord failed:', err.message);

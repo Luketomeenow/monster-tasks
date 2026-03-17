@@ -10,7 +10,7 @@ function getClient() {
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     },
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 
   sheetsClient = google.sheets({ version: 'v4', auth });
@@ -40,4 +40,22 @@ async function getNewRows(spreadsheetId, afterIndex) {
   return { headers, newRows, totalRows: rows.length };
 }
 
-module.exports = { getRows, getRowCount, getNewRows };
+/**
+ * Append one or more rows to a sheet (e.g. Revenue). Row = array of cell values.
+ * @param {string} spreadsheetId
+ * @param {string} sheetName - e.g. 'Revenue'
+ * @param {string[][]} rows - e.g. [ [date, clientName, email, '', cash, '', '', '', '', platform] ]
+ */
+async function appendRows(spreadsheetId, sheetName, rows) {
+  if (!rows.length) return;
+  const sheets = getClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `${sheetName}!A:J`,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: rows },
+  });
+}
+
+module.exports = { getRows, getRowCount, getNewRows, appendRows };
