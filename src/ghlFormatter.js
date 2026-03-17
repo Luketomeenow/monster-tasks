@@ -89,14 +89,31 @@ const OPPORTUNITY_STAGES = {
 };
 
 /**
+ * Build GHL dashboard URL to open this contact (clickable name).
+ * Supports: locationId + contactId, or contactId only.
+ */
+function getGhlContactUrl(body) {
+  const contactId = body.contact?.id ?? body.contactId ?? body.contact_id ?? body.id ?? body.opportunity?.contactId ?? body.opportunity?.contact_id;
+  if (!contactId) return null;
+  const locationId = body.locationId ?? body.location_id ?? body.contact?.locationId ?? body.contact?.location_id ?? body.opportunity?.locationId ?? body.opportunity?.location_id;
+  if (locationId) {
+    return `https://app.gohighlevel.com/v2/location/${locationId}/contacts/contact/${contactId}`;
+  }
+  return `https://app.gohighlevel.com/v2/contacts/contact/${contactId}`;
+}
+
+/**
  * Build embed for opportunity pipeline stage (No show, Follow up, Closed deal).
  * stageKey: 'no_show' | 'follow_up' | 'closed_deal'
+ * Name is clickable and links to the contact in GHL when contact ID is present.
  */
 function buildGhlOpportunityEmbed(stageKey, body) {
   const stage = OPPORTUNITY_STAGES[stageKey] || { label: stageKey, color: 0x3498db };
 
   const contact = body.contact || body;
-  const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.name || contact.fullName || '—';
+  const nameRaw = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.name || contact.fullName || '—';
+  const contactUrl = getGhlContactUrl(body);
+  const name = contactUrl ? `[${nameRaw}](<${contactUrl}>)` : nameRaw;
   const email = contact.email || body.email || '—';
   const phone = contact.phone || contact.phoneNumber || body.phone || '—';
 
