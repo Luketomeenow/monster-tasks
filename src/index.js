@@ -87,7 +87,8 @@ app.post('/whop/webhook', (req, res) => {
       res.status(200).json({ success: true });
       if (REVENUE_SHEET_ID && WHOP_SUCCESS_REVENUE_EVENTS.includes(eventType)) {
         const user = data.user ?? data.member ?? data.customer ?? {};
-        const clientName = user.username ?? user.name ?? [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.email || '';
+        const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+        const clientName = user.username ?? user.name ?? fullName || user.email || '';
         const email = user.email ?? data.email ?? '';
         let cash = data.amount ?? data.total ?? data.value;
         if (cash != null) {
