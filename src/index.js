@@ -6,8 +6,13 @@ const { buildEmbed } = require('./formatters');
 const { parsePayload, buildLeadFromParsed } = require('./typeform');
 const { buildNewLeadEmbed } = require('./typeformFormatter');
 const { buildGhlBookedCallEmbed, buildGhlWorkflowEmbed, buildGhlOpportunityEmbed } = require('./ghlFormatter');
+const { buildCalendlyBookedEmbed, buildCalendlyBookedMinimalEmbed } = require('./calendlyFormatter');
 const { buildWhopPaymentEmbed } = require('./whopFormatter');
-const { buildPayItMonthlyEmbed } = require('./payitmonthlyFormatter');
+const {
+  buildPayItMonthlyEmbed,
+  detectPayItMonthlyEventType,
+  extractPayItMonthlyData,
+} = require('./payitmonthlyFormatter');
 const state = require('./state');
 
 const app = express();
@@ -106,8 +111,6 @@ app.post('/whop/webhook', (req, res) => {
     });
 });
 
-const PAYITMONTHLY_EVENTS = ['Decision', 'Finance App Status', 'prefilter_outcome', 'agreement_status'];
-
 app.post('/payitmonthly/webhook', (req, res) => {
   const webhookUrl = (process.env.DISCORD_WEBHOOK_PAYMENTS || process.env.DISCORD_WEBHOOK_NEW_PAYMENTS || '').trim();
   if (!webhookUrl) {
@@ -117,18 +120,17 @@ app.post('/payitmonthly/webhook', (req, res) => {
   }
 
   const body = req.body || {};
-  const eventType = body.type ?? body.event ?? body.webhook_type ?? body.event_type ?? '';
-  const data = body.data ?? body.payload ?? body;
+  const eventType = detectPayItMonthlyEventType(body);
+  const data = extractPayItMonthlyData(body);
 
-  console.log('[PayItMonthly] Event:', eventType, '| Keys:', Object.keys(body));
+  console.log('[PayItMonthly] Detected event:', eventType || '(none)', '| Body keys:', Object.keys(body));
 
-  const normalizedType = PAYITMONTHLY_EVENTS.includes(eventType) ? eventType : (eventType || 'unknown');
-  const embed = buildPayItMonthlyEmbed(normalizedType, typeof data === 'object' ? data : body);
-  const payItMonthlyData = typeof data === 'object' ? data : body;
+  const embed = buildPayItMonthlyEmbed(eventType || 'unknown', data, body);
+  const payItMonthlyData = data;
 
   sendEmbed(webhookUrl, embed)
     .then(() => {
-      console.log('[PayItMonthly] Sent to Discord:', normalizedType);
+      console.log('[PayItMonthly] Sent to Discord:', eventType || 'notification');
       res.status(200).json({ success: true });
       if (REVENUE_SHEET_ID && payItMonthlyData) {
         const amount = payItMonthlyData.amount ?? payItMonthlyData.total ?? payItMonthlyData.value ?? payItMonthlyData.payment_amount;
@@ -364,6 +366,106 @@ app.get('/ghl/test', (_req, res) => {
     .catch((err) => {
       res.json({ success: false, error: err.message });
     });
+});
+
+const CALENDLY_API_BASE = 'https://api.calendly.com';
+
+function parseCalendlyUris(payload) {
+  const eventUri = payload.event || payload.event_uri;
+  const inviteeUri = payload.invitee || payload.new_invitee || payload.invitee_uri;
+  let eventUuid = null;
+  let inviteeUuid = null;
+  if (eventUri && typeof eventUri === 'string') {
+    const m = eventUri.match(/scheduled_events\/([a-f0-9-]+)/i);
+    if (m) eventUuid = m[1];
+  }
+  if (inviteeUri && typeof inviteeUri === 'string') {
+    const m = inviteeUri.match(/scheduled_events\/([a-f0-9-]+)\/invitees\/([a-f0-9-]+)/i);
+    if (m) {
+      eventUuid = eventUuid || m[1];
+      inviteeUuid = m[2];
+    }
+  }
+  return { eventUri, inviteeUri, eventUuid, inviteeUuid };
+}
+
+async function fetchCalendlyEventAndInvitee(eventUuid, inviteeUuid, token) {
+  const headers = { Authorization: `Bearer ${token}` };
+  const [eventRes, inviteeRes] = await Promise.all([
+    fetch(`${CALENDLY_API_BASE}/scheduled_events/${eventUuid}`, { headers }),
+    inviteeUuid ? fetch(`${CALENDLY_API_BASE}/scheduled_events/${eventUuid}/invitees/${inviteeUuid}`, { headers }) : Promise.resolve(null),
+  ]);
+  if (!eventRes.ok) {
+    const t = await eventRes.text();
+    throw new Error(`Calendly event fetch failed: ${eventRes.status} ${t}`);
+  }
+  const event = await eventRes.json();
+  let invitee = null;
+  if (inviteeRes && inviteeRes.ok) {
+    invitee = await inviteeRes.json();
+  }
+  const resource = event.resource || event;
+  const invResource = invitee && (invitee.resource || invitee);
+  const startTime = resource.start_time || resource.startTime;
+  const endTime = resource.end_time || resource.endTime;
+  const name = invResource ? (invResource.name || [invResource.first_name, invResource.last_name].filter(Boolean).join(' ')) : '';
+  const email = invResource && (invResource.email || invResource.mailto);
+  const eventName = resource.name || resource.event_type || 'Meeting';
+  let meetingLink = '';
+  const loc = resource.location || {};
+  if (loc.join_url) meetingLink = loc.join_url;
+  else if (loc.location) meetingLink = loc.location;
+  else if (typeof loc === 'string') meetingLink = loc;
+  return { name, email, eventName, startTime, endTime, meetingLink };
+}
+
+app.post('/calendly/webhook', (req, res) => {
+  const webhookUrl = (process.env.DISCORD_WEBHOOK_BOOKED_CALL || '').trim();
+  if (!webhookUrl) {
+    console.error('[Calendly] DISCORD_WEBHOOK_BOOKED_CALL not set');
+    res.status(200).json({ success: false, error: 'Call-booked webhook not configured' });
+    return;
+  }
+
+  const body = req.body || {};
+  const eventType = body.event || body.type;
+  const payload = body.payload || body;
+
+  if (eventType === 'invitee.canceled') {
+    res.status(200).json({ success: true, message: 'Canceled event ignored' });
+    return;
+  }
+
+  if (eventType !== 'invitee.created') {
+    console.log('[Calendly] Ignoring event:', eventType);
+    res.status(200).json({ success: true, message: 'Ignored' });
+    return;
+  }
+
+  const { eventUri, inviteeUri, eventUuid, inviteeUuid } = parseCalendlyUris(payload);
+  const token = (process.env.CALENDLY_ACCESS_TOKEN || '').trim();
+
+  const sendToDiscord = (embed) =>
+    sendEmbed(webhookUrl, embed)
+      .then(() => {
+        console.log('[Calendly] Call booked sent to Discord');
+        res.status(200).json({ success: true });
+      })
+      .catch((err) => {
+        console.error('[Calendly] Discord failed:', err.message);
+        res.status(200).json({ success: false, error: err.message });
+      });
+
+  if (token && eventUuid && inviteeUuid) {
+    fetchCalendlyEventAndInvitee(eventUuid, inviteeUuid, token)
+      .then((data) => sendToDiscord(buildCalendlyBookedEmbed(data)))
+      .catch((err) => {
+        console.error('[Calendly] API fetch failed:', err.message);
+        sendToDiscord(buildCalendlyBookedMinimalEmbed(eventUri, inviteeUri));
+      });
+  } else {
+    sendToDiscord(buildCalendlyBookedMinimalEmbed(eventUri, inviteeUri));
+  }
 });
 
 async function initState(savedState) {
