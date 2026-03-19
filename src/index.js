@@ -80,7 +80,13 @@ app.get('/revenue/test', (req, res) => {
       timeout,
     ])
       .then(() => res.json({ success: true, message: `Test row appended to ${REVENUE_SHEET_NAME} sheet` }))
-      .catch((err) => res.json({ success: false, error: err.message || String(err) }));
+      .catch((err) => {
+        const msg = err.message || String(err);
+        const hint = msg.includes('parse range') || msg.includes('Unable to parse')
+          ? ` Check that the tab is named exactly "${REVENUE_SHEET_NAME}" (case-sensitive). Set REVENUE_SHEET_NAME in Railway if it differs.`
+          : '';
+        res.json({ success: false, error: msg + hint });
+      });
   } catch (err) {
     res.json({ success: false, error: err.message || String(err) });
   }

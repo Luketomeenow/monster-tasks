@@ -54,9 +54,10 @@ async function getNewRows(spreadsheetId, afterIndex) {
 async function appendRows(spreadsheetId, sheetName, rows) {
   if (!rows.length) return;
   const sheets = getClient();
+  const range = `'${String(sheetName).replace(/'/g, "''")}'!A:J`;
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${sheetName}!A:J`,
+    range,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values: rows },
