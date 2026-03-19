@@ -428,8 +428,10 @@ app.post('/calendly/webhook', (req, res) => {
   }
 
   const body = req.body || {};
-  const eventType = body.event || body.type;
   const payload = body.payload || body;
+  const eventType = body.event || body.type || payload.event || payload.type || '';
+
+  console.log('[Calendly] Received | event:', eventType, '| keys:', Object.keys(body));
 
   if (eventType === 'invitee.canceled') {
     res.status(200).json({ success: true, message: 'Canceled event ignored' });
@@ -437,7 +439,7 @@ app.post('/calendly/webhook', (req, res) => {
   }
 
   if (eventType !== 'invitee.created') {
-    console.log('[Calendly] Ignoring event:', eventType);
+    console.log('[Calendly] Ignoring event:', eventType, '| body sample:', JSON.stringify(body).slice(0, 300));
     res.status(200).json({ success: true, message: 'Ignored' });
     return;
   }
@@ -466,6 +468,28 @@ app.post('/calendly/webhook', (req, res) => {
   } else {
     sendToDiscord(buildCalendlyBookedMinimalEmbed(eventUri, inviteeUri));
   }
+});
+
+app.get('/calendly/test', (_req, res) => {
+  const webhookUrl = (process.env.DISCORD_WEBHOOK_BOOKED_CALL || '').trim();
+  if (!webhookUrl) {
+    res.json({ error: 'DISCORD_WEBHOOK_BOOKED_CALL not set in Railway' });
+    return;
+  }
+  const testEmbed = {
+    title: '📅 Test – Call booked (Calendly)',
+    color: 0x1abc9c,
+    fields: [
+      { name: 'Event', value: 'Test Event', inline: true },
+      { name: 'Name', value: 'Test Contact', inline: true },
+      { name: 'Email', value: 'test@example.com', inline: true },
+    ],
+    footer: { text: 'BSM Bot · Calendly Test' },
+    timestamp: new Date().toISOString(),
+  };
+  sendEmbed(webhookUrl, testEmbed)
+    .then(() => res.json({ success: true, message: 'Test message sent to call-booked Discord channel' }))
+    .catch((err) => res.json({ success: false, error: err.message }));
 });
 
 async function initState(savedState) {

@@ -124,7 +124,10 @@ function buildGhlOpportunityEmbed(stageKey, body) {
     { name: 'Phone', value: phone, inline: true },
   ];
 
-  const skip = new Set(['contact', 'stage', 'stageName', 'pipelineStage', 'status', 'firstName', 'lastName', 'name', 'fullName', 'email', 'phone', 'phoneNumber']);
+  const skip = new Set([
+    'contact', 'stage', 'stageName', 'pipelineStage', 'status', 'firstName', 'lastName', 'name', 'fullName', 'email', 'phone', 'phoneNumber',
+    'id', 'contactId', 'contact_id', 'contactType', 'contact_type', 'pipelineId', 'pipeline_id', 'opportunitySource', 'opportunity_source', 'opportunityId', 'opportunity_id',
+  ]);
   for (const [key, value] of Object.entries(body)) {
     if (skip.has(key) || value == null || typeof value === 'object') continue;
     const str = String(value).trim();
