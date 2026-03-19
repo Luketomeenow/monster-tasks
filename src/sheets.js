@@ -5,10 +5,15 @@ let sheetsClient = null;
 function getClient() {
   if (sheetsClient) return sheetsClient;
 
+  const key = process.env.GOOGLE_PRIVATE_KEY;
+  if (!key) {
+    throw new Error('GOOGLE_PRIVATE_KEY not set. Required for Google Sheets (Revenue, forms).');
+  }
+
   const auth = new google.auth.GoogleAuth({
     credentials: {
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      private_key: (typeof key === 'string' ? key : '').replace(/\\n/g, '\n'),
     },
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });

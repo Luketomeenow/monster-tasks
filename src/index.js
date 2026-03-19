@@ -38,7 +38,10 @@ function buildRevenueRow({ date, clientName, email, cashCollected, platform }) {
 }
 
 function logPaymentToRevenue(row) {
-  if (!REVENUE_SHEET_ID) return Promise.resolve();
+  if (!REVENUE_SHEET_ID) {
+    console.warn('[Revenue] REVENUE_SHEET_ID not set – skipping append. Add it in Railway Variables.');
+    return Promise.resolve();
+  }
   return appendRows(REVENUE_SHEET_ID, REVENUE_SHEET_NAME, [row])
     .then(() => console.log('[Revenue] Row appended to', REVENUE_SHEET_NAME))
     .catch((err) => console.error('[Revenue] Append failed:', err.message));
@@ -46,6 +49,23 @@ function logPaymentToRevenue(row) {
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), forms: FORMS.length });
+});
+
+app.get('/revenue/test', (_req, res) => {
+  if (!REVENUE_SHEET_ID) {
+    res.json({ error: 'REVENUE_SHEET_ID not set in Railway Variables', sheetId: 'Add 1qFCOwdwuhjknyATldW6Xw-sfJ6YUgQ9qR1TsL7X5AqY for DBS Business Worksheet' });
+    return;
+  }
+  const testRow = buildRevenueRow({
+    date: new Date().toISOString().slice(0, 10),
+    clientName: 'Test (Revenue)',
+    email: 'test@example.com',
+    cashCollected: 0,
+    platform: 'Test',
+  });
+  appendRows(REVENUE_SHEET_ID, REVENUE_SHEET_NAME, [testRow])
+    .then(() => res.json({ success: true, message: `Test row appended to ${REVENUE_SHEET_NAME} sheet` }))
+    .catch((err) => res.json({ success: false, error: err.message }));
 });
 
 app.post('/whop/webhook', (req, res) => {
@@ -133,11 +153,12 @@ app.post('/payitmonthly/webhook', (req, res) => {
       console.log('[PayItMonthly] Sent to Discord:', eventType || 'notification');
       res.status(200).json({ success: true });
       if (REVENUE_SHEET_ID && payItMonthlyData) {
-        const amount = payItMonthlyData.amount ?? payItMonthlyData.total ?? payItMonthlyData.value ?? payItMonthlyData.payment_amount;
+        const merged = { ...(req.body || {}), ...payItMonthlyData };
+        const amount = merged.amount || merged.total || merged.value || merged.payment_amount || merged.PaymentAmount;
         if (amount != null && Number(amount) > 0) {
-          const clientName = payItMonthlyData.customer_name ?? payItMonthlyData.name ?? payItMonthlyData.client_name ?? payItMonthlyData.customerName ?? '';
-          const email = payItMonthlyData.email ?? payItMonthlyData.customer_email ?? payItMonthlyData.customerEmail ?? '';
-          const date = payItMonthlyData.date ?? payItMonthlyData.created_at ?? payItMonthlyData.paid_at;
+          const clientName = merged.customer_name || merged.name || merged.client_name || merged.customerName || '';
+          const email = merged.email || merged.customer_email || merged.customerEmail || '';
+          const date = merged.date || merged.created_at || merged.paid_at;
           const cashCollected = Number(amount);
           logPaymentToRevenue(buildRevenueRow({ date, clientName, email, cashCollected: Number.isNaN(cashCollected) ? amount : cashCollected, platform: 'Pay It Monthly' })).catch(() => {});
         }
