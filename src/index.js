@@ -51,21 +51,39 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), forms: FORMS.length });
 });
 
-app.get('/revenue/test', (_req, res) => {
-  if (!REVENUE_SHEET_ID) {
-    res.json({ error: 'REVENUE_SHEET_ID not set in Railway Variables', sheetId: 'Add 1qFCOwdwuhjknyATldW6Xw-sfJ6YUgQ9qR1TsL7X5AqY for DBS Business Worksheet' });
-    return;
-  }
-  const testRow = buildRevenueRow({
-    date: new Date().toISOString().slice(0, 10),
-    clientName: 'Test (Revenue)',
-    email: 'test@example.com',
-    cashCollected: 0,
-    platform: 'Test',
+app.get('/revenue/status', (_req, res) => {
+  res.json({
+    revenueSheetId: REVENUE_SHEET_ID ? 'set' : 'not set',
+    revenueSheetName: REVENUE_SHEET_NAME,
+    googleCredentials: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'set' : 'not set',
   });
-  appendRows(REVENUE_SHEET_ID, REVENUE_SHEET_NAME, [testRow])
-    .then(() => res.json({ success: true, message: `Test row appended to ${REVENUE_SHEET_NAME} sheet` }))
-    .catch((err) => res.json({ success: false, error: err.message }));
+});
+
+app.get('/revenue/test', (req, res) => {
+  try {
+    if (!REVENUE_SHEET_ID) {
+      res.json({ error: 'REVENUE_SHEET_ID not set in Railway Variables', sheetId: 'Add 1qFCOwdwuhjknyATldW6Xw-sfJ6YUgQ9qR1TsL7X5AqY for DBS Business Worksheet' });
+      return;
+    }
+    const testRow = buildRevenueRow({
+      date: new Date().toISOString().slice(0, 10),
+      clientName: 'Test (Revenue)',
+      email: 'test@example.com',
+      cashCollected: 0,
+      platform: 'Test',
+    });
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Google Sheets request timed out (15s). Check sheet sharing and credentials.')), 15000)
+    );
+    Promise.race([
+      appendRows(REVENUE_SHEET_ID, REVENUE_SHEET_NAME, [testRow]),
+      timeout,
+    ])
+      .then(() => res.json({ success: true, message: `Test row appended to ${REVENUE_SHEET_NAME} sheet` }))
+      .catch((err) => res.json({ success: false, error: err.message || String(err) }));
+  } catch (err) {
+    res.json({ success: false, error: err.message || String(err) });
+  }
 });
 
 app.post('/whop/webhook', (req, res) => {
