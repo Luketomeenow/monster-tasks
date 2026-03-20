@@ -234,6 +234,24 @@ app.post('/typeform/webhook', (req, res) => {
     });
 });
 
+function getGhlAppointmentFromBody(body) {
+  const a = body.appointment || body.data?.appointment || body.payload?.appointment;
+  return a && typeof a === 'object' ? a : null;
+}
+
+function isGhlAppointmentShape(appt) {
+  if (!appt || typeof appt !== 'object') return false;
+  return !!(
+    appt.startTime ||
+    appt.start_time ||
+    appt.endTime ||
+    appt.end_time ||
+    appt.calendarId ||
+    appt.calendar_id ||
+    appt.title
+  );
+}
+
 app.post('/ghl/webhook', (req, res) => {
   const webhookUrl = (process.env.DISCORD_WEBHOOK_BOOKED_CALL || '').trim();
   if (!webhookUrl) {
@@ -247,9 +265,17 @@ app.post('/ghl/webhook', (req, res) => {
   console.log('[GHL] Payload:', JSON.stringify(body).slice(0, 500));
   console.log('[GHL] Sending to webhook URL ending in:', '...' + webhookUrl.slice(-20));
 
+  const typeNorm = String(body.type || body.event || '').replace(/\s/g, '').toLowerCase();
+  const appt = getGhlAppointmentFromBody(body);
+  const looksLikeAppointment =
+    typeNorm === 'appointmentcreate' ||
+    typeNorm === 'appointment.create' ||
+    typeNorm === 'appointment_booked' ||
+    typeNorm === 'calendarbooked';
+
   let embed;
-  if (body.type === 'AppointmentCreate' && body.appointment) {
-    embed = buildGhlBookedCallEmbed(body.appointment);
+  if (appt && (looksLikeAppointment || isGhlAppointmentShape(appt))) {
+    embed = buildGhlBookedCallEmbed(appt);
   } else {
     embed = buildGhlWorkflowEmbed(body);
   }
@@ -413,6 +439,16 @@ app.get('/ghl/test', (_req, res) => {
     });
 });
 
+app.get('/ghl/booked-call/status', (_req, res) => {
+  const set = !!(process.env.DISCORD_WEBHOOK_BOOKED_CALL || '').trim();
+  res.json({
+    discordBookedCallWebhook: set ? 'set' : 'not set',
+    ghlWebhookUrl: 'POST …/ghl/webhook (GHL workflows + native appointment webhooks)',
+    calendlyWebhookUrl: 'POST …/calendly/webhook',
+    tests: 'GET /ghl/test and GET /calendly/test send a test embed to the call-booked channel',
+  });
+});
+
 const CALENDLY_API_BASE = 'https://api.calendly.com';
 
 function parseCalendlyUris(payload) {
@@ -474,16 +510,24 @@ app.post('/calendly/webhook', (req, res) => {
 
   const body = req.body || {};
   const payload = body.payload || body;
-  const eventType = body.event || body.type || payload.event || payload.type || '';
+  // Calendly: top-level "event" is invitee.created — do NOT use payload.event (that is usually the scheduled_events URI).
+  let eventType = (body.event || body.type || '').trim();
+  if (!eventType && payload.type && typeof payload.type === 'string' && !payload.type.startsWith('http')) {
+    eventType = payload.type.trim();
+  }
+  if (!eventType && typeof payload.event === 'string' && !payload.event.includes('api.calendly.com')) {
+    eventType = payload.event.trim();
+  }
+  const eventNorm = eventType.toLowerCase().replace(/_/g, '.');
 
   console.log('[Calendly] Received | event:', eventType, '| keys:', Object.keys(body));
 
-  if (eventType === 'invitee.canceled') {
+  if (eventNorm === 'invitee.canceled' || eventNorm === 'inviteecanceled') {
     res.status(200).json({ success: true, message: 'Canceled event ignored' });
     return;
   }
 
-  if (eventType !== 'invitee.created') {
+  if (eventNorm !== 'invitee.created' && eventNorm !== 'inviteecreated') {
     console.log('[Calendly] Ignoring event:', eventType, '| body sample:', JSON.stringify(body).slice(0, 300));
     res.status(200).json({ success: true, message: 'Ignored' });
     return;

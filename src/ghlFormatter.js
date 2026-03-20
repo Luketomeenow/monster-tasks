@@ -3,8 +3,10 @@
  * Uses DISCORD_WEBHOOK_BOOKED_CALL - same channel as Google Form "Booked Call".
  */
 function buildGhlBookedCallEmbed(appointment) {
-  const start = appointment.startTime ? formatGhlDate(appointment.startTime) : '—';
-  const end = appointment.endTime ? formatGhlDate(appointment.endTime) : '—';
+  const startIso = appointment.startTime || appointment.start_time;
+  const endIso = appointment.endTime || appointment.end_time;
+  const start = startIso ? formatGhlDate(startIso) : '—';
+  const end = endIso ? formatGhlDate(endIso) : '—';
   const title = appointment.title || 'Call booked';
   const status = appointment.appointmentStatus || '—';
   const source = appointment.source || '—';
@@ -17,7 +19,7 @@ function buildGhlBookedCallEmbed(appointment) {
     { name: 'Source', value: source, inline: true },
     { name: 'Start', value: start, inline: true },
     { name: 'End', value: end, inline: true },
-    { name: 'Calendar ID', value: appointment.calendarId || '—', inline: true },
+    { name: 'Calendar ID', value: appointment.calendarId || appointment.calendar_id || '—', inline: true },
     { name: 'Notes', value: notes || '—', inline: false },
   ];
 
