@@ -12,6 +12,7 @@ const {
   buildPayItMonthlyEmbed,
   detectPayItMonthlyEventType,
   extractPayItMonthlyData,
+  mergePayItMonthlyRoots,
 } = require('./payitmonthlyFormatter');
 const state = require('./state');
 
@@ -177,7 +178,7 @@ app.post('/payitmonthly/webhook', (req, res) => {
       console.log('[PayItMonthly] Sent to Discord:', eventType || 'notification');
       res.status(200).json({ success: true });
       if (REVENUE_SHEET_ID && payItMonthlyData) {
-        const merged = { ...(req.body || {}), ...payItMonthlyData };
+        const merged = mergePayItMonthlyRoots(req.body || {});
         const amount = merged.amount || merged.total || merged.value || merged.payment_amount || merged.PaymentAmount;
         if (amount != null && Number(amount) > 0) {
           const clientName = merged.customer_name || merged.name || merged.client_name || merged.customerName || '';
