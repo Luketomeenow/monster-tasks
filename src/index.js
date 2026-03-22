@@ -19,6 +19,100 @@ const state = require('./state');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+/**
+ * Pay It Monthly webhooks often omit `Content-Type: application/json` or use form encoding.
+ * express.json() then leaves req.body as {} — logs show Body keys: [].
+ * This route is mounted BEFORE express.json() and reads raw bytes.
+ */
+function parsePayItMonthlyRawBody(rawText, contentType) {
+  const ct = (contentType || '').toLowerCase();
+  const text = typeof rawText === 'string' ? rawText.trim() : '';
+  if (!text) return {};
+  try {
+    if (ct.includes('application/x-www-form-urlencoded') || (/=/.test(text) && !text.startsWith('{'))) {
+      const params = new URLSearchParams(text);
+      const obj = Object.fromEntries(params);
+      const merged = { ...obj };
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v !== 'string') continue;
+        const s = v.trim();
+        if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']'))) {
+          try {
+            const p = JSON.parse(s);
+            if (p && typeof p === 'object' && !Array.isArray(p)) Object.assign(merged, p);
+            else merged[k] = p;
+          } catch (_) {
+            /* keep string */
+          }
+        }
+      }
+      return merged;
+    }
+    if (text.startsWith('{') || text.startsWith('[')) {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+      return { items: parsed };
+    }
+  } catch (e) {
+    return { _parseError: String(e.message), _rawPreview: text.slice(0, 400) };
+  }
+  return { _rawText: text.slice(0, 1500) };
+}
+
+const payItMonthlyRouter = express.Router();
+payItMonthlyRouter.post('/webhook', express.raw({ type: '*/*', limit: '5mb' }), (req, res) => {
+  const webhookUrl = (process.env.DISCORD_WEBHOOK_PAYMENTS || process.env.DISCORD_WEBHOOK_NEW_PAYMENTS || '').trim();
+  if (!webhookUrl) {
+    console.error('[PayItMonthly] DISCORD_WEBHOOK_PAYMENTS not set');
+    res.status(200).json({ success: false, error: 'Payment webhook not configured' });
+    return;
+  }
+
+  const buf = req.body;
+  const rawText = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf || '');
+  const body = parsePayItMonthlyRawBody(rawText, req.headers['content-type']);
+
+  console.log(
+    '[PayItMonthly] Content-Type:',
+    req.headers['content-type'] || '(none)',
+    '| raw bytes:',
+    Buffer.isBuffer(buf) ? buf.length : 0,
+    '| keys:',
+    Object.keys(body)
+  );
+
+  const eventType = detectPayItMonthlyEventType(body);
+  const data = extractPayItMonthlyData(body);
+
+  console.log('[PayItMonthly] Detected event:', eventType || '(none)', '| Body keys:', Object.keys(body));
+
+  const embed = buildPayItMonthlyEmbed(eventType || 'unknown', data, body);
+  const payItMonthlyData = data;
+
+  sendEmbed(webhookUrl, embed)
+    .then(() => {
+      console.log('[PayItMonthly] Sent to Discord:', eventType || 'notification');
+      res.status(200).json({ success: true });
+      if (REVENUE_SHEET_ID && payItMonthlyData) {
+        const merged = mergePayItMonthlyRoots(body);
+        const amount = merged.amount || merged.total || merged.value || merged.payment_amount || merged.PaymentAmount;
+        if (amount != null && Number(amount) > 0) {
+          const clientName = merged.customer_name || merged.name || merged.client_name || merged.customerName || '';
+          const email = merged.email || merged.customer_email || merged.customerEmail || '';
+          const date = merged.date || merged.created_at || merged.paid_at;
+          const cashCollected = Number(amount);
+          logPaymentToRevenue(buildRevenueRow({ date, clientName, email, cashCollected: Number.isNaN(cashCollected) ? amount : cashCollected, platform: 'Pay It Monthly' })).catch(() => {});
+        }
+      }
+    })
+    .catch((err) => {
+      console.error('[PayItMonthly] Discord failed:', err.message);
+      res.status(200).json({ success: false, error: err.message });
+    });
+});
+
+app.use('/payitmonthly', payItMonthlyRouter);
+
 app.use(express.json());
 
 const WHOP_PAYMENT_EVENTS = [
@@ -152,45 +246,6 @@ app.post('/whop/webhook', (req, res) => {
     })
     .catch((err) => {
       console.error('[WHOP] Discord failed:', err.message);
-      res.status(200).json({ success: false, error: err.message });
-    });
-});
-
-app.post('/payitmonthly/webhook', (req, res) => {
-  const webhookUrl = (process.env.DISCORD_WEBHOOK_PAYMENTS || process.env.DISCORD_WEBHOOK_NEW_PAYMENTS || '').trim();
-  if (!webhookUrl) {
-    console.error('[PayItMonthly] DISCORD_WEBHOOK_PAYMENTS not set');
-    res.status(200).json({ success: false, error: 'Payment webhook not configured' });
-    return;
-  }
-
-  const body = req.body || {};
-  const eventType = detectPayItMonthlyEventType(body);
-  const data = extractPayItMonthlyData(body);
-
-  console.log('[PayItMonthly] Detected event:', eventType || '(none)', '| Body keys:', Object.keys(body));
-
-  const embed = buildPayItMonthlyEmbed(eventType || 'unknown', data, body);
-  const payItMonthlyData = data;
-
-  sendEmbed(webhookUrl, embed)
-    .then(() => {
-      console.log('[PayItMonthly] Sent to Discord:', eventType || 'notification');
-      res.status(200).json({ success: true });
-      if (REVENUE_SHEET_ID && payItMonthlyData) {
-        const merged = mergePayItMonthlyRoots(req.body || {});
-        const amount = merged.amount || merged.total || merged.value || merged.payment_amount || merged.PaymentAmount;
-        if (amount != null && Number(amount) > 0) {
-          const clientName = merged.customer_name || merged.name || merged.client_name || merged.customerName || '';
-          const email = merged.email || merged.customer_email || merged.customerEmail || '';
-          const date = merged.date || merged.created_at || merged.paid_at;
-          const cashCollected = Number(amount);
-          logPaymentToRevenue(buildRevenueRow({ date, clientName, email, cashCollected: Number.isNaN(cashCollected) ? amount : cashCollected, platform: 'Pay It Monthly' })).catch(() => {});
-        }
-      }
-    })
-    .catch((err) => {
-      console.error('[PayItMonthly] Discord failed:', err.message);
       res.status(200).json({ success: false, error: err.message });
     });
 });
