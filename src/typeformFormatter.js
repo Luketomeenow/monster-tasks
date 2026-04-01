@@ -48,7 +48,11 @@ function buildNewLeadEmbed(lead) {
     { name: 'Phone', value: safe(lead.phone, '—'), inline: true },
   ];
 
-  const skipPatterns = ['first name', 'last name', 'email', 'phone', 'full name'];
+  if ((lead.company || '').trim()) {
+    embedFields.push({ name: 'Company', value: truncValue(lead.company), inline: true });
+  }
+
+  const skipPatterns = ['first name', 'last name', 'email', 'phone', 'full name', 'company'];
   for (const f of (lead.fields || [])) {
     const lower = (f.title || '').toLowerCase();
     if (skipPatterns.some((p) => lower.includes(p))) continue;

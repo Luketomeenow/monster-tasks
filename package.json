@@ -11,6 +11,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "discord.js": "^14.25.1",
     "express": "^4.21.0",
     "googleapis": "^144.0.0"
   }

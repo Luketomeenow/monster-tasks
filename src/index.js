@@ -15,6 +15,7 @@ const {
   mergePayItMonthlyRoots,
 } = require('./payitmonthlyFormatter');
 const state = require('./state');
+const { runOnboardingProvisioning } = require('./onboarding');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -280,6 +281,9 @@ app.post('/typeform/webhook', (req, res) => {
     .then(() => {
       console.log(`[Typeform] New lead sent to Discord (${lead.qualified ? 'QUALIFIED' : 'Unqualified'})`);
       res.status(200).send();
+      runOnboardingProvisioning({ lead, parsed }).catch((err) => {
+        console.error('[Onboarding] Unhandled error:', err.message);
+      });
     })
     .catch((err) => {
       console.error('[Typeform] Discord webhook failed:', err.message);

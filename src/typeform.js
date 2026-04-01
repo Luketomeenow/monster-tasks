@@ -31,6 +31,7 @@ function parsePayload(body) {
     return null;
   }
 
+  const formId = formResponse.form_id || '';
   const submittedAt = formResponse.submitted_at || new Date().toISOString();
   const d = new Date(submittedAt);
   const dateStr = [
@@ -56,7 +57,7 @@ function parsePayload(body) {
   // Hidden fields (UTM etc.)
   const hidden = formResponse.hidden || {};
 
-  return { submittedAt, dateStr, fields, hidden };
+  return { submittedAt, dateStr, fields, hidden, formId };
 }
 
 /**
@@ -82,6 +83,7 @@ function buildLeadFromParsed(parsed) {
   let lastName = '';
   let email = '';
   let phone = '';
+  let company = '';
   let qualified = false;
   let costAnswer = '';
 
@@ -92,6 +94,7 @@ function buildLeadFromParsed(parsed) {
     else if (lower === 'name' || lower === 'full name') firstName = f.value;
     else if (lower.includes('email')) email = f.value;
     else if (lower.includes('phone')) phone = f.value;
+    else if (lower.includes('company')) company = f.value;
 
     if (isQualificationQuestion(f.title)) {
       costAnswer = f.value;
@@ -114,6 +117,7 @@ function buildLeadFromParsed(parsed) {
   return {
     dateStr,
     name,
+    company: (company || '').trim(),
     email: email || 'N/A',
     phone: phone || 'N/A',
     fields,

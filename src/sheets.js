@@ -1,23 +1,36 @@
 const { google } = require('googleapis');
 
 let sheetsClient = null;
+let googleAuth = null;
 
-function getClient() {
-  if (sheetsClient) return sheetsClient;
+const GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/drive',
+];
+
+function getGoogleAuth() {
+  if (googleAuth) return googleAuth;
 
   const key = process.env.GOOGLE_PRIVATE_KEY;
   if (!key) {
     throw new Error('GOOGLE_PRIVATE_KEY not set. Required for Google Sheets (Revenue, forms).');
   }
 
-  const auth = new google.auth.GoogleAuth({
+  googleAuth = new google.auth.GoogleAuth({
     credentials: {
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       private_key: (typeof key === 'string' ? key : '').replace(/\\n/g, '\n'),
     },
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    scopes: GOOGLE_SCOPES,
   });
 
+  return googleAuth;
+}
+
+function getClient() {
+  if (sheetsClient) return sheetsClient;
+
+  const auth = getGoogleAuth();
   sheetsClient = google.sheets({ version: 'v4', auth });
   return sheetsClient;
 }
@@ -64,4 +77,4 @@ async function appendRows(spreadsheetId, sheetName, rows) {
   });
 }
 
-module.exports = { getRows, getRowCount, getNewRows, appendRows };
+module.exports = { getRows, getRowCount, getNewRows, appendRows, getGoogleAuth, GOOGLE_SCOPES };
