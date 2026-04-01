@@ -15,7 +15,7 @@ const {
   mergePayItMonthlyRoots,
 } = require('./payitmonthlyFormatter');
 const state = require('./state');
-const { runOnboardingProvisioning } = require('./onboarding');
+const { runOnboardingProvisioning, shouldSkipNewLeadDiscord } = require('./onboarding');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -143,6 +143,32 @@ function logPaymentToRevenue(row) {
     .catch((err) => console.error('[Revenue] Append failed:', err.message));
 }
 
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Root + Discord OAuth redirect (redirect_uri often points here; show ?code= for token exchange). */
+app.get('/', (req, res) => {
+  const oauthErr = req.query.error;
+  if (oauthErr) {
+    const desc = req.query.error_description || '';
+    return res.type('html').send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>OAuth</title></head><body style="font-family:system-ui,sans-serif;max-width:36rem;margin:2rem"><h1>Authorization not completed</h1><p><strong>${escapeHtml(oauthErr)}</strong></p>${desc ? `<p>${escapeHtml(desc)}</p>` : ''}</body></html>`
+    );
+  }
+  const code = req.query.code;
+  if (code) {
+    return res.type('html').send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Discord OAuth code</title></head><body style="font-family:system-ui,sans-serif;max-width:40rem;margin:2rem"><h1>Authorization code</h1><p>Copy this one-time <code>code</code>, then POST to <code>https://discord.com/api/oauth2/token</code> with <code>grant_type=authorization_code</code>, your <code>client_id</code>, <code>client_secret</code>, and the same <code>redirect_uri</code> as in the Developer Portal. Use the <code>access_token</code> from the response as <code>DISCORD_GUILD_TEMPLATE_USER_ACCESS_TOKEN</code>.</p><pre style="background:#f5f5f5;padding:1rem;word-break:break-all;overflow:auto">${escapeHtml(code)}</pre></body></html>`
+    );
+  }
+  res.type('text').send('BSMbot is running. GET /health — Typeform POST /typeform/webhook\n');
+});
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), forms: FORMS.length });
 });
@@ -252,6 +278,33 @@ app.post('/whop/webhook', (req, res) => {
 });
 
 function handleTypeformWebhook(req, res) {
+  let parsed;
+  let lead;
+  try {
+    parsed = parsePayload(req.body);
+    if (!parsed) {
+      res.status(400).json({ error: 'Invalid Typeform webhook payload' });
+      return;
+    }
+    lead = buildLeadFromParsed(parsed);
+  } catch (err) {
+    console.error('[Typeform] Parse/format error:', err.message);
+    res.status(500).json({ error: 'Error processing payload', detail: err.message });
+    return;
+  }
+
+  const formId = parsed.formId || '';
+  const skipNewLead = shouldSkipNewLeadDiscord(formId);
+
+  if (skipNewLead) {
+    console.log('[Typeform] Skipping new-lead Discord (onboarding / excluded form):', formId || '(no form_id)');
+    res.status(200).send();
+    runOnboardingProvisioning({ lead, parsed }).catch((err) => {
+      console.error('[Onboarding] Unhandled error:', err.message);
+    });
+    return;
+  }
+
   const rawUrl = process.env.DISCORD_WEBHOOK_NEW_LEAD;
   const webhookUrl = rawUrl ? rawUrl.trim() : '';
   if (!webhookUrl) {
@@ -260,20 +313,12 @@ function handleTypeformWebhook(req, res) {
     return;
   }
 
-  let parsed;
-  let lead;
   let embed;
   try {
-    parsed = parsePayload(req.body);
-    if (!parsed) {
-      res.status(400).json({ error: 'Invalid Typeform webhook payload' });
-      return;
-    }
-    lead = buildLeadFromParsed(parsed);
     embed = buildNewLeadEmbed(lead);
   } catch (err) {
-    console.error('[Typeform] Parse/format error:', err.message);
-    res.status(500).json({ error: 'Error processing payload', detail: err.message });
+    console.error('[Typeform] Embed error:', err.message);
+    res.status(500).json({ error: 'Error building embed', detail: err.message });
     return;
   }
 

@@ -12,17 +12,25 @@ function sanitizeGuildName(str, fallback = 'New client') {
 }
 
 /**
- * New guild from a server template (discord.new code). Bot must be under Discord’s guild-creation limits.
+ * New guild from a server template (discord.new code).
+ * Discord returns "Bots cannot use this endpoint" for bot tokens on POST /guilds/templates — use a user OAuth2 access token.
  * @returns {{ guildId: string, name: string }}
  */
 async function createGuildFromTemplate(templateCode, serverName) {
-  const token = (process.env.DISCORD_BOT_TOKEN || '').trim();
   const code = (templateCode || '').trim();
-  if (!token || !code) {
-    throw new Error('DISCORD_BOT_TOKEN and a template code are required to create a guild from template');
+  const userToken = (process.env.DISCORD_GUILD_TEMPLATE_USER_ACCESS_TOKEN || '').trim();
+  if (!code) {
+    throw new Error('DISCORD_GUILD_TEMPLATE_CODE is required to create a guild from template');
+  }
+  if (!userToken) {
+    throw new Error(
+      'Discord does not allow bot tokens to create servers from templates. Set DISCORD_GUILD_TEMPLATE_USER_ACCESS_TOKEN ' +
+      'to a user OAuth2 access token with the `guilds` scope, or remove DISCORD_GUILD_TEMPLATE_CODE and use hub mode ' +
+      '(DISCORD_ONBOARDING_GUILD_ID + DISCORD_BOT_TOKEN) instead.'
+    );
   }
 
-  const rest = new REST({ version: '10' }).setToken(token);
+  const rest = new REST({ version: '10', authPrefix: 'Bearer' }).setToken(userToken);
   const name = sanitizeGuildName(serverName);
   const guild = await rest.post(Routes.template(code), {
     body: { name },

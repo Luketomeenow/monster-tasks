@@ -1,4 +1,4 @@
-const { createFolderInParent } = require('./drive');
+const { createFolderInParent, createClientSubfolders } = require('./drive');
 const {
   createOnboardingCategoryWithChannels,
   createGuildFromTemplate,
@@ -19,14 +19,32 @@ function shouldRunOnboardingForForm(formId) {
   return allowed.includes(formId);
 }
 
+/**
+ * Do not post to DISCORD_WEBHOOK_NEW_LEAD for these forms (e.g. full onboarding vs marketing opt-in).
+ * Skips when form_id is in TYPEFORM_EXCLUDE_NEW_LEAD_FORM_IDS, or when TYPEFORM_ONBOARDING_FORM_IDS is set and form_id is listed there.
+ */
+function shouldSkipNewLeadDiscord(formId) {
+  const exclude = (process.env.TYPEFORM_EXCLUDE_NEW_LEAD_FORM_IDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (formId && exclude.includes(formId)) return true;
+  const onboardingOnly = (process.env.TYPEFORM_ONBOARDING_FORM_IDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (formId && onboardingOnly.length && onboardingOnly.includes(formId)) return true;
+  return false;
+}
+
 function hasDriveOnboarding() {
   return !!(process.env.GOOGLE_DRIVE_ONBOARDING_PARENT_ID || '').trim();
 }
 
 function hasDiscordTemplateOnboarding() {
-  const token = (process.env.DISCORD_BOT_TOKEN || '').trim();
+  const userToken = (process.env.DISCORD_GUILD_TEMPLATE_USER_ACCESS_TOKEN || '').trim();
   const code = (process.env.DISCORD_GUILD_TEMPLATE_CODE || '').trim();
-  return !!(token && code);
+  return !!(userToken && code);
 }
 
 /** Hub server: category + channels under one guild */
@@ -73,7 +91,7 @@ async function runOnboardingProvisioning({ lead, parsed }) {
     'Client';
   const folderCategoryLabel = `${sanitizeFolderName(baseName)} — ${datePart}`;
 
-  const result = { drive: null, discord: null, errors: [] };
+  const result = { drive: null, driveSubfolders: null, discord: null, errors: [] };
 
   if (hasDriveOnboarding()) {
     try {
@@ -81,6 +99,15 @@ async function runOnboardingProvisioning({ lead, parsed }) {
       const folder = await createFolderInParent(folderCategoryLabel, parentId);
       result.drive = folder;
       console.log('[Onboarding] Drive folder created:', folder.webViewLink || folder.id);
+      try {
+        const subfolders = await createClientSubfolders(folder.id);
+        result.driveSubfolders = subfolders;
+        console.log('[Onboarding] Drive subfolders created:', subfolders.length);
+      } catch (subErr) {
+        const subMsg = subErr.message || String(subErr);
+        result.errors.push({ step: 'drive_subfolders', message: subMsg });
+        console.error('[Onboarding] Drive subfolders failed:', subMsg);
+      }
     } catch (err) {
       const msg = err.message || String(err);
       result.errors.push({ step: 'drive', message: msg });
@@ -100,6 +127,11 @@ async function runOnboardingProvisioning({ lead, parsed }) {
       result.errors.push({ step: 'discord', message: msg });
       console.error('[Onboarding] Discord (template) failed:', msg);
     }
+  } else if ((process.env.DISCORD_GUILD_TEMPLATE_CODE || '').trim()) {
+    console.warn(
+      '[Onboarding] DISCORD_GUILD_TEMPLATE_CODE is set but DISCORD_GUILD_TEMPLATE_USER_ACCESS_TOKEN is missing — ' +
+        'Discord does not allow bots to create servers from templates. Add a user OAuth2 token or use hub mode (DISCORD_ONBOARDING_GUILD_ID).'
+    );
   } else if (hasDiscordHubOnboarding()) {
     try {
       const channels = parseChannelNameList();
@@ -119,6 +151,7 @@ async function runOnboardingProvisioning({ lead, parsed }) {
 module.exports = {
   runOnboardingProvisioning,
   shouldRunOnboardingForForm,
+  shouldSkipNewLeadDiscord,
   hasDriveOnboarding,
   hasDiscordOnboarding,
   hasDiscordTemplateOnboarding,
