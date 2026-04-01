@@ -251,7 +251,7 @@ app.post('/whop/webhook', (req, res) => {
     });
 });
 
-app.post('/typeform/webhook', (req, res) => {
+function handleTypeformWebhook(req, res) {
   const rawUrl = process.env.DISCORD_WEBHOOK_NEW_LEAD;
   const webhookUrl = rawUrl ? rawUrl.trim() : '';
   if (!webhookUrl) {
@@ -292,7 +292,10 @@ app.post('/typeform/webhook', (req, res) => {
         detail: err.message,
       });
     });
-});
+}
+
+app.post('/typeform/webhook', handleTypeformWebhook);
+app.post('/typeform/webhook/', handleTypeformWebhook);
 
 function getGhlAppointmentFromBody(body) {
   const a = body.appointment || body.data?.appointment || body.payload?.appointment;
