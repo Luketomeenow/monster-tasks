@@ -49,12 +49,26 @@ function formatGhlDate(iso) {
 }
 
 /**
+ * GHL often sends snake_case (full_name, first_name) on the body or under contact; camelCase may be absent.
+ */
+function getGhlContactDisplayName(body) {
+  const nested = body.contact && typeof body.contact === 'object' && !Array.isArray(body.contact) ? body.contact : {};
+  const c = { ...nested, ...body };
+  const full = String(c.full_name || c.fullName || c.name || '').trim();
+  if (full) return full;
+  const fn = String(c.first_name || c.firstName || '').trim();
+  const ln = String(c.last_name || c.lastName || '').trim();
+  const combined = [fn, ln].filter(Boolean).join(' ').trim();
+  return combined || '—';
+}
+
+/**
  * Build embed from GHL workflow webhook payload (contact details + any custom/trigger data).
  * GHL workflow "Fire a webhook" sends contact and custom data, not the developer AppointmentCreate shape.
  */
 function buildGhlWorkflowEmbed(body) {
   const contact = body.contact || body;
-  const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.name || contact.fullName || '—';
+  const name = getGhlContactDisplayName(body);
   const email = contact.email || body.email || '—';
   const phone = contact.phone || contact.phoneNumber || body.phone || '—';
 
@@ -65,7 +79,19 @@ function buildGhlWorkflowEmbed(body) {
   ];
 
   // Include any other top-level or contact fields that look useful (avoid huge objects)
-  const skip = new Set(['contact', 'firstName', 'lastName', 'name', 'fullName', 'email', 'phone', 'phoneNumber']);
+  const skip = new Set([
+    'contact',
+    'firstName',
+    'lastName',
+    'first_name',
+    'last_name',
+    'name',
+    'fullName',
+    'full_name',
+    'email',
+    'phone',
+    'phoneNumber',
+  ]);
   for (const [key, value] of Object.entries(body)) {
     if (skip.has(key) || value == null || typeof value === 'object') continue;
     const str = String(value).trim();
@@ -112,8 +138,7 @@ function getGhlContactUrl(body) {
 function buildGhlOpportunityEmbed(stageKey, body) {
   const stage = OPPORTUNITY_STAGES[stageKey] || { label: stageKey, color: 0x3498db };
 
-  const contact = body.contact || body;
-  const nameRaw = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.name || contact.fullName || '—';
+  const nameRaw = getGhlContactDisplayName(body);
   const contactUrl = getGhlContactUrl(body);
   const name = contactUrl ? `[${nameRaw}](<${contactUrl}>)` : nameRaw;
   const email = contact.email || body.email || '—';
@@ -127,8 +152,32 @@ function buildGhlOpportunityEmbed(stageKey, body) {
   ];
 
   const skip = new Set([
-    'contact', 'stage', 'stageName', 'pipelineStage', 'status', 'firstName', 'lastName', 'name', 'fullName', 'email', 'phone', 'phoneNumber',
-    'id', 'contactId', 'contact_id', 'contactType', 'contact_type', 'pipelineId', 'pipeline_id', 'opportunitySource', 'opportunity_source', 'opportunityId', 'opportunity_id',
+    'contact',
+    'stage',
+    'stageName',
+    'pipelineStage',
+    'status',
+    'firstName',
+    'lastName',
+    'first_name',
+    'last_name',
+    'name',
+    'fullName',
+    'full_name',
+    'email',
+    'phone',
+    'phoneNumber',
+    'id',
+    'contactId',
+    'contact_id',
+    'contactType',
+    'contact_type',
+    'pipelineId',
+    'pipeline_id',
+    'opportunitySource',
+    'opportunity_source',
+    'opportunityId',
+    'opportunity_id',
   ]);
   for (const [key, value] of Object.entries(body)) {
     if (skip.has(key) || value == null || typeof value === 'object') continue;
