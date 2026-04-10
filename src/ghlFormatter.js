@@ -137,6 +137,7 @@ function getGhlContactUrl(body) {
  */
 function buildGhlOpportunityEmbed(stageKey, body) {
   const stage = OPPORTUNITY_STAGES[stageKey] || { label: stageKey, color: 0x3498db };
+  const contact = body.contact || body;
 
   const nameRaw = getGhlContactDisplayName(body);
   const contactUrl = getGhlContactUrl(body);
