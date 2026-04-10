@@ -81,14 +81,6 @@ function buildNewLeadEmbed(lead) {
     });
   }
 
-  if (lead.calendarLink) {
-    embedFields.push({
-      name: 'Calendar Link',
-      value: truncValue(lead.calendarLink),
-      inline: false,
-    });
-  }
-
   return {
     title,
     color,
